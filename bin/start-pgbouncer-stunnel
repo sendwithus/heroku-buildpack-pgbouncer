@@ -15,9 +15,19 @@ do
   eval ${POSTGRES_URL}=\$${POSTGRES_URL}_PGBOUNCER
 done
 
-psmgr=/tmp/pgbouncer-buildpack-wait
-rm -f $psmgr
-mkfifo $psmgr
+#Start stunnel
+(
+	#We expect stunnel to run in the foreground.
+	echo 'buildpack=pgbouncer at=stunnel-start'
+	vendor/stunnel/bin/stunnel vendor/stunnel/stunnel-pgbouncer.conf
+) &
+
+#Start PGBouncer
+(
+	#We expect pgbouncer to run in the foreground.
+	echo 'buildpack=pgbouncer at=pgbouncer-start'
+	vendor/pgbouncer/bin/pgbouncer vendor/pgbouncer/pgbouncer.ini
+) &
 
 #Start App Server
 (
@@ -26,30 +36,4 @@ mkfifo $psmgr
 	echo "buildpack=pgbouncer at=app-start cmd=$*"
 	"$@"
 	echo 'app' >$psmgr
-) &
-
-#Start stunnel
-(
-	#We expect stunnel to run in the foreground.
-	echo 'buildpack=pgbouncer at=stunnel-start'
-	vendor/stunnel/bin/stunnel vendor/stunnel/stunnel-pgbouncer.conf
-	echo 'stunnel' >$psmgr
-) &
-
-#Start PGBouncer
-(
-	#We expect pgbouncer to run in the foreground.
-	echo 'buildpack=pgbouncer at=pgbouncer-start'
-	vendor/pgbouncer/bin/pgbouncer vendor/pgbouncer/pgbouncer.ini
-	echo 'pgbouncer' >$psmgr
-) &
-
-#This read will block the process waiting on a msg to be put into the fifo.
-#If any of the processes defined above should exit,
-#a msg will be put into the fifo causing the read operation
-#to un-block. The process putting the msg into the fifo
-#will use it's process name as a msg so that we can print the offending
-#process to stdout.
-read exit_process <$psmgr
-echo "buildpack=pgbouncer at=exit process=$exit_process"
-exit 1
+)
