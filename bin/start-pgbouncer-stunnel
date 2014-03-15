@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Adapted from https://github.com/ryandotsmith/nginx-buildpack/
 
+declare -a subs #array of subshell pids
+
+function kill_subs() {
+for pid in ${subs[@]}; do
+    echo "Sending SIGINT to `ps -o cmd -p $pid --no-headers | cat`"
+    kill -SIGINT $pid
+  done
+}
+
 #Generate config files
 echo 'buildpack=pgbouncer at=config-gen-start'
 source bin/gen-pgbouncer-conf.sh
@@ -15,25 +24,26 @@ do
   eval ${POSTGRES_URL}=\$${POSTGRES_URL}_PGBOUNCER
 done
 
+trap kill_subs SIGTERM
+
 #Start stunnel
 (
-	#We expect stunnel to run in the foreground.
-	echo 'buildpack=pgbouncer at=stunnel-start'
-	vendor/stunnel/bin/stunnel vendor/stunnel/stunnel-pgbouncer.conf
+  #We expect stunnel to run in the foreground.
+  echo 'buildpack=pgbouncer at=stunnel-start'
+  vendor/stunnel/bin/stunnel vendor/stunnel/stunnel-pgbouncer.conf
 ) &
+subs[0]=$!
 
 #Start PGBouncer
 (
-	#We expect pgbouncer to run in the foreground.
-	echo 'buildpack=pgbouncer at=pgbouncer-start'
-	vendor/pgbouncer/bin/pgbouncer vendor/pgbouncer/pgbouncer.ini
+  #We expect pgbouncer to run in the foreground.
+  echo 'buildpack=pgbouncer at=pgbouncer-start'
+  vendor/pgbouncer/bin/pgbouncer vendor/pgbouncer/pgbouncer.ini
 ) &
+subs[1]=$!
 
 #Start App Server
-(
-	#Take the command passed to this bin and start it.
-	#E.g. bin/start-pgbouncer-stunnel bundle exec unicorn -c config/unicorn.rb
-	echo "buildpack=pgbouncer at=app-start cmd=$*"
-	"$@"
-	echo 'app' >$psmgr
-)
+#Take the command passed to this bin and start it.
+#E.g. bin/start-pgbouncer-stunnel bundle exec unicorn -c config/unicorn.rb
+echo "buildpack=pgbouncer at=app-start cmd=$*"
+exec "$@"
